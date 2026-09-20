@@ -10,6 +10,7 @@ import (
 
 	"skillshare/internal/config"
 	"skillshare/internal/git"
+	"skillshare/internal/mcp"
 )
 
 type gitStatusResponse struct {
@@ -620,6 +621,9 @@ func (s *Server) handleAbsorbNested(w http.ResponseWriter, r *http.Request) {
 }
 
 type pullResponse struct {
+	Extras      []extraSyncResult  `json:"extras,omitempty"`
+	MCP         *mcp.Result        `json:"mcp,omitempty"`
+	Error       string             `json:"error,omitempty"`
 	Success     bool               `json:"success"`
 	UpToDate    bool               `json:"upToDate"`
 	Commits     []git.CommitInfo   `json:"commits"`
@@ -712,36 +716,15 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 		resp.Commits = make([]git.CommitInfo, 0)
 	}
 
-	// Sync what the pulled scope holds, as the CLI does. Skills always sync
-	// from the skills source, whatever directory git_root points at.
-	switch scope := s.cfg.GitRoot; {
-	case info.UpToDate:
-	case scope == "extras":
-		for _, extra := range s.syncExtras("", false, false) {
-			for _, t := range extra.Targets {
-				for _, msg := range append([]string{t.Error}, t.Errors...) {
-					if msg != "" {
-						resp.Warnings = append(resp.Warnings, fmt.Sprintf("extras sync failed for %s (%s): %s", extra.Name, t.Target, msg))
-					}
-				}
-			}
-		}
-	default:
-		kind := "" // root holds both
-		if scope == "" || scope == "skills" {
-			kind = kindSkill
-		} else if scope == "agents" {
-			kind = kindAgent
-		}
-		if out, _, err := s.syncResources(start, false, false, kind); err != nil {
-			resp.Warnings = append(resp.Warnings, "sync after pull failed: "+err.Error())
-		} else {
-			resp.SyncResults = out.results
-			resp.Warnings = append(resp.Warnings, out.warnings...)
-		}
+	syncErr := s.syncPulledScope(start, &resp)
+	status := "ok"
+	if syncErr != nil {
+		resp.Success = false
+		resp.Error = "git pull completed; synchronization failed: " + syncErr.Error()
+		status = "error"
 	}
 
-	s.writeOpsLog("pull", "ok", start, map[string]any{
+	s.writeOpsLog("pull", status, start, map[string]any{
 		"dry_run":      false,
 		"up_to_date":   resp.UpToDate,
 		"commits":      len(resp.Commits),
@@ -750,5 +733,53 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 		"scope":        "ui",
 	}, "")
 
+	if syncErr != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+	}
 	writeJSON(w, resp)
+}
+
+func (s *Server) syncPulledScope(start time.Time, response *pullResponse) error {
+	scope := s.cfg.GitRoot
+	var service *mcp.Service
+	if scope == "root" {
+		service = s.mcpService()
+		plan, err := service.Preview()
+		if err != nil {
+			return fmt.Errorf("MCP preflight: %w", err)
+		}
+		response.MCP = &mcp.Result{Plan: plan, Applied: []string{}, BackupIDs: []string{}}
+		if plan.Blocked {
+			return fmt.Errorf("MCP conflicts found; no resources synchronized")
+		}
+	}
+	if scope != "extras" {
+		kind := ""
+		if scope == "" || scope == "skills" {
+			kind = kindSkill
+		} else if scope == "agents" {
+			kind = kindAgent
+		}
+		out, _, err := s.syncResources(start, false, false, kind)
+		if err != nil {
+			response.MCP = nil
+			return err
+		}
+		response.SyncResults = out.results
+		response.Warnings = append(response.Warnings, out.warnings...)
+	}
+	if scope == "extras" || scope == "root" {
+		response.Extras = s.syncExtras("", false, false)
+		if err := extrasResultsError(response.Extras); err != nil {
+			response.MCP = nil
+			return err
+		}
+	}
+	if service != nil && len(response.MCP.Plan.Changes) > 0 {
+		var err error
+		response.MCP, err = service.Apply("")
+		return err
+	}
+	return nil
 }

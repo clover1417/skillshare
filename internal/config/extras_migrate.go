@@ -3,13 +3,18 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
 
 // MigrateExtrasDir moves legacy extras directories from configDir/name/ to configDir/extras/name/.
 // Only names listed in extras config are migrated. Returns warnings for cases needing user attention.
-func MigrateExtrasDir(configDir string, extras []ExtraConfig) []string {
+func MigrateExtrasDir(configDir string, extras []ExtraConfig, output ...io.Writer) []string {
+	var writer io.Writer = os.Stdout
+	if len(output) > 0 {
+		writer = output[0]
+	}
 	var warnings []string
 
 	for _, extra := range extras {
@@ -45,7 +50,7 @@ func MigrateExtrasDir(configDir string, extras []ExtraConfig) []string {
 			continue
 		}
 
-		fmt.Printf("  Migrated %s/ → extras/%s/\n", name, name)
+		fmt.Fprintf(writer, "  Migrated %s/ → extras/%s/\n", name, name)
 	}
 
 	return warnings

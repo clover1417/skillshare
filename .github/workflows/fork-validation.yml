@@ -1,0 +1,45 @@
+name: Fork validation
+
+on:
+  push:
+    branches: [codex/windows-sync-reliability]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Format
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Vet
+        run: go vet ./...
+      - name: Unit and command tests
+        run: go test -race -timeout 10m ./internal/... ./cmd/skillshare
+      - name: Build
+        run: go build -o bin/skillshare ./cmd/skillshare
+      - name: Integration tests
+        run: go test -race -timeout 10m ./tests/integration/...
+        env:
+          SKILLSHARE_TEST_BINARY: ${{ github.workspace }}/bin/skillshare
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Windows regression tests
+        run: go test ./internal/sync ./internal/server ./cmd/skillshare -run '^(TestFileSync|TestSyncReliability|TestPruneOrphanAgent|TestSyncAgents_CopyMode)' -count=1 -timeout=3m
+      - name: Build
+        run: go build -o bin/skillshare.exe ./cmd/skillshare

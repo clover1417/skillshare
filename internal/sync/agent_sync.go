@@ -86,75 +86,7 @@ func linkResolvesToSource(absLink, absSource string) bool {
 // syncAgentsMerge creates per-file symlinks in targetDir for each discovered agent.
 // Existing non-symlink files are preserved (skipped) unless force is true.
 func syncAgentsMerge(agents []resource.DiscoveredResource, sourceDir, targetDir string, dryRun, force bool, projectRoot string) (*AgentSyncResult, error) {
-	result := &AgentSyncResult{}
-	relative := shouldUseRelative(projectRoot, sourceDir, targetDir)
-
-	if !dryRun {
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create agent target directory: %w", err)
-		}
-	}
-
-	for _, agent := range agents {
-		targetPath := filepath.Join(targetDir, agent.FlatName)
-
-		info, err := os.Lstat(targetPath)
-		if err == nil {
-			if info.Mode()&os.ModeSymlink != 0 {
-				absLink, linkErr := utils.ResolveLinkTarget(targetPath)
-				if linkErr != nil {
-					return nil, fmt.Errorf("failed to resolve link for %s: %w", agent.FlatName, linkErr)
-				}
-				absSource, _ := filepath.Abs(agent.AbsPath)
-
-				if linkResolvesToSource(absLink, absSource) {
-					dest, _ := os.Readlink(targetPath)
-					if !linkNeedsReformat(dest, relative) {
-						result.Linked = append(result.Linked, agent.FlatName)
-						continue
-					}
-					if !dryRun {
-						if err := reformatLink(targetPath, agent.AbsPath, relative); err != nil {
-							return nil, fmt.Errorf("failed to reformat symlink for %s: %w", agent.FlatName, err)
-						}
-					}
-					result.Updated = append(result.Updated, agent.FlatName)
-					continue
-				}
-
-				if !dryRun {
-					os.Remove(targetPath)
-					if err := createLink(targetPath, agent.AbsPath, relative); err != nil {
-						return nil, fmt.Errorf("failed to create symlink for %s: %w", agent.FlatName, err)
-					}
-				}
-				result.Updated = append(result.Updated, agent.FlatName)
-			} else {
-				if force {
-					if !dryRun {
-						os.Remove(targetPath)
-						if err := createLink(targetPath, agent.AbsPath, relative); err != nil {
-							return nil, fmt.Errorf("failed to create symlink for %s: %w", agent.FlatName, err)
-						}
-					}
-					result.Updated = append(result.Updated, agent.FlatName)
-				} else {
-					result.Skipped = append(result.Skipped, agent.FlatName)
-				}
-			}
-		} else if os.IsNotExist(err) {
-			if !dryRun {
-				if err := createLink(targetPath, agent.AbsPath, relative); err != nil {
-					return nil, fmt.Errorf("failed to create symlink for %s: %w", agent.FlatName, err)
-				}
-			}
-			result.Linked = append(result.Linked, agent.FlatName)
-		} else {
-			return nil, fmt.Errorf("failed to check target path for %s: %w", agent.FlatName, err)
-		}
-	}
-
-	return result, nil
+	return syncAgentFiles(agents, targetDir, "merge", dryRun, force, shouldUseRelative(projectRoot, sourceDir, targetDir))
 }
 
 // syncAgentsSymlink creates a single directory symlink from targetDir to sourceDir.
@@ -163,13 +95,15 @@ func syncAgentsSymlink(sourceDir, targetDir string, dryRun, force bool, projectR
 	result := &AgentSyncResult{}
 	relative := shouldUseRelative(projectRoot, sourceDir, targetDir)
 
-	if err := os.MkdirAll(filepath.Dir(targetDir), 0755); err != nil {
-		return nil, fmt.Errorf("failed to create target parent: %w", err)
+	if !dryRun {
+		if err := os.MkdirAll(filepath.Dir(targetDir), 0755); err != nil {
+			return nil, fmt.Errorf("failed to create target parent: %w", err)
+		}
 	}
 
-	info, err := os.Lstat(targetDir)
+	_, err := os.Lstat(targetDir)
 	if err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
+		if utils.IsSymlinkOrJunction(targetDir) {
 			// Already a symlink — check if correct
 			absLink, linkErr := utils.ResolveLinkTarget(targetDir)
 			if linkErr != nil {
@@ -231,47 +165,27 @@ func syncAgentsSymlink(sourceDir, targetDir string, dryRun, force bool, projectR
 // syncAgentsCopy copies agent .md files to targetDir.
 // Existing files are overwritten if content differs; force replaces all.
 func syncAgentsCopy(agents []resource.DiscoveredResource, targetDir string, dryRun, force bool) (*AgentSyncResult, error) {
+	return syncAgentFiles(agents, targetDir, "copy", dryRun, force, false)
+}
+
+func syncAgentFiles(agents []resource.DiscoveredResource, targetDir, mode string, dryRun, force, relative bool) (*AgentSyncResult, error) {
 	result := &AgentSyncResult{}
-
-	if !dryRun {
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create agent target directory: %w", err)
-		}
-	}
-
 	for _, agent := range agents {
-		targetPath := filepath.Join(targetDir, agent.FlatName)
-
-		srcData, err := os.ReadFile(agent.AbsPath)
+		path := filepath.Join(targetDir, agent.FlatName)
+		_, beforeErr := os.Lstat(path)
+		before := fileInSync(agent.AbsPath, path, mode, relative)
+		_, skipped, err := syncManagedFile(agent.AbsPath, path, mode, dryRun, force, relative, "agent")
 		if err != nil {
-			return nil, fmt.Errorf("failed to read source %s: %w", agent.FlatName, err)
+			return nil, fmt.Errorf("sync agent %s: %w", agent.FlatName, err)
 		}
-
-		if _, statErr := os.Stat(targetPath); statErr == nil {
-			// File exists — check if content matches
-			tgtData, readErr := os.ReadFile(targetPath)
-			if readErr == nil && string(tgtData) == string(srcData) && !force {
-				result.Linked = append(result.Linked, agent.FlatName)
-				continue
-			}
-			// Content differs or force — overwrite
-			if !dryRun {
-				if err := os.WriteFile(targetPath, srcData, 0644); err != nil {
-					return nil, fmt.Errorf("failed to write %s: %w", agent.FlatName, err)
-				}
-			}
+		if skipped > 0 {
+			result.Skipped = append(result.Skipped, agent.FlatName)
+		} else if beforeErr == nil && !before {
 			result.Updated = append(result.Updated, agent.FlatName)
 		} else {
-			// New file
-			if !dryRun {
-				if err := os.WriteFile(targetPath, srcData, 0644); err != nil {
-					return nil, fmt.Errorf("failed to write %s: %w", agent.FlatName, err)
-				}
-			}
 			result.Linked = append(result.Linked, agent.FlatName)
 		}
 	}
-
 	return result, nil
 }
 
@@ -283,88 +197,20 @@ func SyncAgentsToTarget(agents []resource.DiscoveredResource, targetDir string, 
 
 // PruneOrphanAgentLinks removes file symlinks in targetDir that don't
 // correspond to any discovered agent. For merge mode only.
-func PruneOrphanAgentLinks(targetDir string, agents []resource.DiscoveredResource, dryRun bool) (removed []string, _ error) {
-	entries, err := os.ReadDir(targetDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read agent target directory: %w", err)
-	}
-
-	expected := make(map[string]bool, len(agents))
-	for _, a := range agents {
-		expected[a.FlatName] = true
-	}
-
-	for _, entry := range entries {
-		name := entry.Name()
-
-		if !strings.HasSuffix(strings.ToLower(name), ".md") {
-			continue
-		}
-
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-
-		if info.Mode()&os.ModeSymlink == 0 {
-			continue
-		}
-
-		if expected[name] {
-			continue
-		}
-
-		if !dryRun {
-			os.Remove(filepath.Join(targetDir, name))
-		}
-		removed = append(removed, name)
-	}
-
-	return removed, nil
+func PruneOrphanAgentLinks(targetDir string, agents []resource.DiscoveredResource, dryRun bool) ([]string, error) {
+	return PruneOrphanAgentCopies(targetDir, agents, dryRun)
 }
 
 // PruneOrphanAgentCopies removes copied .md files in targetDir that don't
 // correspond to any discovered agent. For copy mode only.
-func PruneOrphanAgentCopies(targetDir string, agents []resource.DiscoveredResource, dryRun bool) (removed []string, _ error) {
-	entries, err := os.ReadDir(targetDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read agent target directory: %w", err)
-	}
-
+func PruneOrphanAgentCopies(targetDir string, agents []resource.DiscoveredResource, dryRun bool) ([]string, error) {
 	expected := make(map[string]bool, len(agents))
-	for _, a := range agents {
-		expected[a.FlatName] = true
+	for _, agent := range agents {
+		expected[agent.FlatName] = true
 	}
-
-	for _, entry := range entries {
-		name := entry.Name()
-
-		if !strings.HasSuffix(strings.ToLower(name), ".md") {
-			continue
-		}
-
-		// Skip conventional excludes (user might have README.md etc.)
-		if resource.ConventionalExcludes[name] {
-			continue
-		}
-
-		if expected[name] {
-			continue
-		}
-
-		if !dryRun {
-			os.Remove(filepath.Join(targetDir, name))
-		}
-		removed = append(removed, name)
-	}
-
-	return removed, nil
+	return pruneManagedFiles(targetDir, func(name string, entry managedFile) bool {
+		return entry.Kind == "agent" && !expected[name] && !resource.ConventionalExcludes[name]
+	}, dryRun)
 }
 
 // FindLocalAgents finds local (non-symlinked) agent files in a target directory.
@@ -372,7 +218,7 @@ func PruneOrphanAgentCopies(targetDir string, agents []resource.DiscoveredResour
 func FindLocalAgents(targetDir, sourcePath string) ([]LocalAgentInfo, error) {
 	var agents []LocalAgentInfo
 
-	info, err := os.Lstat(targetDir)
+	_, err := os.Lstat(targetDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return agents, nil
@@ -380,7 +226,7 @@ func FindLocalAgents(targetDir, sourcePath string) ([]LocalAgentInfo, error) {
 		return nil, fmt.Errorf("failed to read agent target directory: %w", err)
 	}
 
-	if info.Mode()&os.ModeSymlink != 0 {
+	if utils.IsSymlinkOrJunction(targetDir) {
 		absLink, err := utils.ResolveLinkTarget(targetDir)
 		if err != nil {
 			return nil, err
@@ -403,6 +249,11 @@ func FindLocalAgents(targetDir, sourcePath string) ([]LocalAgentInfo, error) {
 		return nil, fmt.Errorf("failed to read agent target directory: %w", err)
 	}
 
+	managed, err := readFileManifest(targetDir)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, entry := range entries {
 		name := entry.Name()
 
@@ -419,6 +270,10 @@ func FindLocalAgents(targetDir, sourcePath string) ([]LocalAgentInfo, error) {
 		}
 
 		if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+
+		if record, ok := managed[name]; ok && record.Kind == "agent" && sourceWithin(record.Source, sourcePath) && managedFileUnchanged(filepath.Join(targetDir, name), record) {
 			continue
 		}
 

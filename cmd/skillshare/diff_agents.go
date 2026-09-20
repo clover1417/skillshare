@@ -8,6 +8,7 @@ import (
 
 	"skillshare/internal/config"
 	"skillshare/internal/resource"
+	"skillshare/internal/sync"
 	"skillshare/internal/ui"
 	"skillshare/internal/utils"
 )
@@ -213,6 +214,15 @@ func computeAgentDiff(targetName, targetDir string, agents []resource.Discovered
 		}
 
 		targetPath := filepath.Join(targetDir, flatName)
+		switch sync.AgentFileState(targetPath, agent.AbsPath) {
+		case "synced":
+			continue
+		case "update":
+			r.items = append(r.items, copyDiffEntry{action: "modify", name: flatName, kind: "agent", reason: "source content changed", isSync: true})
+			r.synced = false
+			r.syncCount++
+			continue
+		}
 		if fileType&os.ModeSymlink != 0 || utils.IsSymlinkOrJunction(targetPath) {
 			absLink, err := utils.ResolveLinkTarget(targetPath)
 			if err != nil {
@@ -254,15 +264,15 @@ func computeAgentDiff(targetName, targetDir string, agents []resource.Discovered
 	}
 
 	// Extra in target (orphans)
-	for name, fileType := range existing {
+	for name := range existing {
 		if _, ok := expected[name]; !ok {
 			targetPath := filepath.Join(targetDir, name)
-			if fileType&os.ModeSymlink != 0 || utils.IsSymlinkOrJunction(targetPath) {
+			if state := sync.AgentFileState(targetPath, ""); state == "synced" || state == "update" || state == "orphan" {
 				r.items = append(r.items, copyDiffEntry{
 					action: "remove",
 					name:   name,
 					kind:   "agent",
-					reason: "orphan symlink",
+					reason: "orphan managed file",
 					isSync: true,
 				})
 				r.synced = false

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -211,15 +212,6 @@ func cmdSync(args []string) error {
 			return syncAgentsProject(cwd, dryRun, force, jsonOutput, start)
 		}
 
-		if hasAll && !jsonOutput {
-			// Run project extras sync after project skills sync (text mode)
-			defer func() {
-				if extrasErr := cmdSyncExtras(append([]string{"-p"}, rest...)); extrasErr != nil {
-					ui.Warning("Extras sync: %v", extrasErr)
-				}
-			}()
-		}
-
 		stats, results, projIgnoreStats, projCtxCost, err := cmdSyncProject(cwd, dryRun, force, jsonOutput, quiet)
 		stats.ProjectScope = true
 		logSyncOp(config.ProjectConfigPath(cwd), stats, start, err)
@@ -232,7 +224,6 @@ func cmdSync(args []string) error {
 		}
 
 		if jsonOutput {
-			err = finishMCP(err)
 			if hasAll {
 				projCfg, loadErr := config.LoadProject(cwd)
 				if loadErr == nil && len(projCfg.Extras) > 0 {
@@ -240,10 +231,15 @@ func cmdSync(args []string) error {
 					extrasEntries := runExtrasSyncEntries(projCfg.Extras, func(extra config.ExtraConfig) string {
 						return config.ExtrasSourceDirProject(projCfg.EffectiveExtrasSource(cwd), extra.Name)
 					}, dryRun, force, cwd, agentPaths)
+					err = finishMCP(errors.Join(err, extrasSyncError(extrasEntries)))
 					return syncOutputJSON(results, dryRun, start, projIgnoreStats, err, projCtxCost, mcpResult, extrasEntries)
 				}
 			}
+			err = finishMCP(err)
 			return syncOutputJSON(results, dryRun, start, projIgnoreStats, err, projCtxCost, mcpResult)
+		}
+		if hasAll {
+			err = errors.Join(err, cmdSyncExtrasProject(cwd, dryRun, force, false, start))
 		}
 		return finishMCP(err)
 	}
@@ -389,7 +385,6 @@ func cmdSync(args []string) error {
 	}
 
 	if jsonOutput {
-		syncErr = finishMCP(syncErr)
 		var ctxCost *contextCostJSON
 		if analyzeErr == nil && len(analyzeEntries) > 0 {
 			ctxCost = buildContextCostJSON(analyzeEntries, cfg.ContextBudget)
@@ -399,14 +394,16 @@ func cmdSync(args []string) error {
 			extrasEntries := runExtrasSyncEntries(cfg.Extras, func(extra config.ExtraConfig) string {
 				return config.ResolveExtrasSourceDir(extra, cfg.EffectiveExtrasSource(), cfg.EffectiveSkillsSource())
 			}, dryRun, force, "", agentPaths)
+			syncErr = finishMCP(errors.Join(syncErr, extrasSyncError(extrasEntries)))
 			return syncOutputJSON(results, dryRun, start, ignoreStats, syncErr, ctxCost, mcpResult, extrasEntries)
 		}
+		syncErr = finishMCP(syncErr)
 		return syncOutputJSON(results, dryRun, start, ignoreStats, syncErr, ctxCost, mcpResult)
 	}
 
 	if hasAll {
 		if extrasErr := cmdSyncExtras(append([]string{"-g"}, rest...)); extrasErr != nil {
-			ui.Warning("Extras sync: %v", extrasErr)
+			syncErr = errors.Join(syncErr, extrasErr)
 		}
 	}
 
@@ -534,6 +531,7 @@ func syncOutputJSON(results []syncTargetResult, dryRun bool, start time.Time, iS
 	output.IgnoredSkills = ignoredSkills
 	if len(extras) > 0 && extras[0] != nil {
 		output.Extras = extras[0]
+		syncErr = errors.Join(syncErr, extrasSyncError(extras[0]))
 	}
 	output.ContextCost = ctxCost
 	output.MCP = mcpResult
