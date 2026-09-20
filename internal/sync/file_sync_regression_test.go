@@ -260,6 +260,23 @@ func TestFileSyncTargetRemovalPreservesLocalChanges(t *testing.T) {
 	}
 }
 
+func TestFileSyncTargetRemovalPreservesOtherSource(t *testing.T) {
+	src, dst := setupExtrasTest(t, map[string]string{"shared.md": "first source"})
+	other, _ := setupExtrasTest(t, map[string]string{"shared.md": "second source"})
+	for _, source := range []string{src, other} {
+		if result, err := SyncExtra(source, dst, "copy", false, true, false, "", nil); err != nil || len(result.Errors) != 0 {
+			t.Fatalf("sync: %+v %v", result, err)
+		}
+	}
+	removed, failures := PruneExtraTargetFiles(dst, "copy", map[string]bool{"shared.md": true}, src)
+	if removed != 0 || len(failures) != 0 {
+		t.Fatalf("removed another source's file: %d %v", removed, failures)
+	}
+	if data, err := os.ReadFile(filepath.Join(dst, "shared.md")); err != nil || string(data) != "second source" {
+		t.Fatalf("other source content: %q %v", data, err)
+	}
+}
+
 func TestFileSyncDirectoryOverlapAndMissingSource(t *testing.T) {
 	src, dst := setupExtrasTest(t, map[string]string{"AGENTS.md": "keep"})
 	for _, target := range []string{src, filepath.Dir(src), filepath.Join(src, "nested")} {

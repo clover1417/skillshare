@@ -151,7 +151,7 @@ func cmdExtrasRemoveTarget(args []string) error {
 		}
 
 		var errs []string
-		pruned, errs = sync.PruneExtraTargetFiles(resolved, targetMode, managedFiles)
+		pruned, errs = sync.PruneExtraTargetFiles(resolved, targetMode, managedFiles, sourceDirForExtra(extras[idx]))
 		if len(errs) > 0 {
 			for _, msg := range errs {
 				ui.Warning("%s", msg)

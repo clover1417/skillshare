@@ -347,10 +347,12 @@ func PruneExtraTarget(targetPath, mode string) (int, []string) {
 	return pruneExtraManifests(targetPath, func(string, managedFile) bool { return true }, nil)
 }
 
-func PruneExtraTargetFiles(targetPath, mode string, managedFiles map[string]bool) (int, []string) {
+func PruneExtraTargetFiles(targetPath, mode string, managedFiles map[string]bool, sourceDir ...string) (int, []string) {
 	switch mode {
 	case "", "merge", "copy":
-		return pruneExtraManifests(targetPath, func(rel string, entry managedFile) bool { return managedFiles[rel] }, managedFiles)
+		return pruneExtraManifests(targetPath, func(rel string, entry managedFile) bool {
+			return managedFiles[rel] && (len(sourceDir) == 0 || sourceWithin(entry.Source, sourceDir[0]))
+		}, managedFiles)
 	case "symlink":
 		return pruneExtraSymlinkTarget(targetPath)
 	default:
