@@ -3,6 +3,7 @@ name: Fork validation
 on:
   push:
     branches: [codex/windows-sync-reliability]
+    paths-ignore: ['docs/**', 'README.md', 'FORK_NOTES.md']
   workflow_dispatch:
 
 permissions:
@@ -43,3 +44,5 @@ jobs:
         run: go test ./internal/sync ./internal/server ./cmd/skillshare -run '^(TestFileSync|TestSyncReliability|TestPruneOrphanAgent|TestSyncAgents_CopyMode)' -count=1 -timeout=3m
       - name: Build
         run: go build -o bin/skillshare.exe ./cmd/skillshare
+      - name: Native CLI workflow
+        run: ./scripts/test_windows_sync.ps1 -Binary ./bin/skillshare.exe

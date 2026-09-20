@@ -1347,15 +1347,11 @@ func TestExtrasRemove_WithPerExtraSource(t *testing.T) {
 	}
 }
 
-// TestExtrasSync_AutoCreatesSourceDir verifies that "sync extras" auto-creates
-// the extras source directory when it does not exist.
-func TestExtrasSync_AutoCreatesSourceDir(t *testing.T) {
+func TestExtrasSync_ReportsMissingSourceDir(t *testing.T) {
 	sb := testutil.NewSandbox(t)
 	defer sb.Cleanup()
 
-	// Set extras_source to a non-existent directory
 	customExtras := filepath.Join(sb.Home, "new-extras-dir")
-	// Don't create it — sync should auto-create
 
 	claudeTarget := sb.CreateTarget("claude")
 	rulesTarget := filepath.Join(sb.Home, ".claude", "rules")
@@ -1365,16 +1361,14 @@ func TestExtrasSync_AutoCreatesSourceDir(t *testing.T) {
 		sb.SourcePath, customExtras, claudeTarget, rulesTarget))
 
 	result := sb.RunCLI("sync", "extras", "-g")
-	result.AssertSuccess(t)
+	result.AssertFailure(t)
 
-	// Verify source dir was auto-created
 	rulesDir := filepath.Join(customExtras, "rules")
-	if _, err := os.Stat(rulesDir); os.IsNotExist(err) {
-		t.Errorf("expected sync to auto-create source dir at %s", rulesDir)
+	if _, err := os.Stat(rulesDir); !os.IsNotExist(err) {
+		t.Errorf("sync must not recreate a missing source at %s", rulesDir)
 	}
 
-	// Verify output mentions creation
-	result.AssertAnyOutputContains(t, "Created source directory")
+	result.AssertAnyOutputContains(t, "source directory does not exist")
 }
 
 // TestExtrasInit_WithExtrasSource_AutoCreatesDir verifies that "extras init"

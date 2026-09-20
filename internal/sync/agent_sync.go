@@ -166,7 +166,6 @@ func syncAgentsSymlink(sourceDir, targetDir string, dryRun, force bool, projectR
 }
 
 // syncAgentsCopy copies agent .md files to targetDir.
-// Existing files are overwritten if content differs; force replaces all.
 func syncAgentsCopy(agents []resource.DiscoveredResource, targetDir string, dryRun, force bool) (*AgentSyncResult, error) {
 	return syncAgentFiles(agents, targetDir, "copy", dryRun, force, false)
 }

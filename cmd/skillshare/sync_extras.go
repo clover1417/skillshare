@@ -141,7 +141,7 @@ func finishExtrasSync(entries []syncExtrasJSONEntry, configPath, scope string, d
 			case target.Error != "":
 				ui.Warning("%s: %s", path, target.Error)
 			case target.SkippedBy != "":
-				ui.Info("%s: already managed by %s", path, target.SkippedBy)
+				ui.Warning("Skipping extras %q target %s: already managed by %s sync", entry.Name, path, target.SkippedBy)
 			case target.Skipped > 0:
 				ui.Warning("%s: %d synced, %d skipped, %d pruned (use --force to override conflicts)", path, target.Synced, target.Skipped, target.Pruned)
 			default:

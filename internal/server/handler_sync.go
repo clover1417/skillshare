@@ -94,8 +94,7 @@ type syncOutcome struct {
 }
 
 // syncResources links skills and agents (kind "" means both) into every target
-// and logs the sync. On failure it returns the HTTP status to report; agent
-// failures only add warnings. Callers must hold s.mu.
+// and logs the sync. On failure it returns the HTTP status to report.
 func (s *Server) syncResources(start time.Time, dryRun, force bool, kind string) (*syncOutcome, int, error) {
 	globalMode := s.cfg.Mode
 	if globalMode == "" {

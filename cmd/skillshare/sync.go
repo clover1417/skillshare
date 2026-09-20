@@ -226,6 +226,7 @@ func cmdSync(args []string) error {
 		if jsonOutput {
 			if hasAll {
 				projCfg, loadErr := config.LoadProject(cwd)
+				err = errors.Join(err, loadErr)
 				if loadErr == nil && len(projCfg.Extras) > 0 {
 					agentPaths := collectAgentTargetPathsProject(cwd)
 					extrasEntries := runExtrasSyncEntries(projCfg.Extras, func(extra config.ExtraConfig) string {
@@ -531,7 +532,9 @@ func syncOutputJSON(results []syncTargetResult, dryRun bool, start time.Time, iS
 	output.IgnoredSkills = ignoredSkills
 	if len(extras) > 0 && extras[0] != nil {
 		output.Extras = extras[0]
-		syncErr = errors.Join(syncErr, extrasSyncError(extras[0]))
+		if syncErr == nil {
+			syncErr = extrasSyncError(extras[0])
+		}
 	}
 	output.ContextCost = ctxCost
 	output.MCP = mcpResult
