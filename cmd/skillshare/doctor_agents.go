@@ -109,6 +109,12 @@ func countAgentLinksAndBroken(dir string) (linked, broken int) {
 			continue
 		}
 		if e.Type()&os.ModeSymlink == 0 {
+			switch sync.AgentFileState(filepath.Join(dir, e.Name()), "") {
+			case "synced":
+				linked++
+			case "update", "orphan", "conflict":
+				broken++
+			}
 			continue
 		}
 		// It's a symlink — check if target exists (os.Stat follows symlinks)

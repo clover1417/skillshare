@@ -8,6 +8,8 @@ import (
 
 	"skillshare/internal/config"
 	"skillshare/internal/install"
+	"skillshare/internal/resource"
+	ssync "skillshare/internal/sync"
 )
 
 // newTestServer creates an isolated Server for handler testing.
@@ -129,5 +131,24 @@ func addAgentMeta(t *testing.T, agentsDir, relPath, source string) {
 	})
 	if err := store.Save(agentsDir); err != nil {
 		t.Fatalf("addAgentMeta: %v", err)
+	}
+}
+
+func seedManagedAgent(t *testing.T, source, target string) {
+	t.Helper()
+	_, statErr := os.Stat(source)
+	if os.IsNotExist(statErr) {
+		if err := os.WriteFile(source, []byte("# Agent"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agents := []resource.DiscoveredResource{{FlatName: filepath.Base(target), AbsPath: source}}
+	if _, err := ssync.SyncAgents(agents, filepath.Dir(source), filepath.Dir(target), "merge", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if os.IsNotExist(statErr) {
+		if err := os.Remove(source); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

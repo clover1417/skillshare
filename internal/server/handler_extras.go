@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -509,16 +511,21 @@ func (s *Server) handleExtrasSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.RLock()
+	s.mu.Lock()
 	results := s.syncExtras(body.Name, body.DryRun, body.Force)
-	s.mu.RUnlock()
+	s.mu.Unlock()
 
 	if body.Name != "" && len(results) == 0 {
 		writeError(w, http.StatusNotFound, "extra not found: "+body.Name)
 		return
 	}
 
-	s.writeOpsLog("extras-sync", "ok", start, map[string]any{
+	syncErr := extrasResultsError(results)
+	status := "ok"
+	if syncErr != nil {
+		status = "error"
+	}
+	s.writeOpsLog("extras-sync", status, start, map[string]any{
 		"name":   body.Name,
 		"dryRun": body.DryRun,
 		"force":  body.Force,
@@ -526,7 +533,13 @@ func (s *Server) handleExtrasSync(w http.ResponseWriter, r *http.Request) {
 		"scope":  "ui",
 	}, "")
 
-	writeJSON(w, map[string]any{"extras": results})
+	response := map[string]any{"extras": results}
+	if syncErr != nil {
+		response["error"] = syncErr.Error()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+	}
+	writeJSON(w, response)
 }
 
 // syncExtras syncs every extra (or only the one named) into its targets.
@@ -551,11 +564,6 @@ func (s *Server) syncExtras(name string, dryRun, force bool) []extraSyncResult {
 			sourceDir = config.ExtrasSourceDirProject(projectExtrasParent, extra.Name)
 		} else {
 			sourceDir = config.ResolveExtrasSourceDir(extra, extrasSource, source)
-		}
-
-		// Auto-create source directory if it doesn't exist
-		if _, statErr := os.Stat(sourceDir); os.IsNotExist(statErr) {
-			os.MkdirAll(sourceDir, 0755)
 		}
 
 		result := extraSyncResult{
@@ -904,4 +912,18 @@ func (s *Server) handleExtrasRemoveTarget(w http.ResponseWriter, r *http.Request
 	}, "")
 
 	writeJSON(w, map[string]any{"success": true, "name": name, "target": body.Path})
+}
+
+func extrasResultsError(results []extraSyncResult) error {
+	var failures []error
+	for _, extra := range results {
+		for _, target := range extra.Targets {
+			for _, message := range append([]string{target.Error}, target.Errors...) {
+				if message != "" {
+					failures = append(failures, fmt.Errorf("%s (%s): %s", extra.Name, target.Target, message))
+				}
+			}
+		}
+	}
+	return errors.Join(failures...)
 }

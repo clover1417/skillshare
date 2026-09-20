@@ -162,6 +162,9 @@ func TestPruneOrphanAgentLinks(t *testing.T) {
 	orphanSrc := filepath.Join(sourceDir, "orphan.md")
 	os.WriteFile(orphanSrc, []byte("# Orphan"), 0644)
 	os.Symlink(orphanSrc, filepath.Join(targetDir, "orphan.md"))
+	if _, err := SyncAgents([]resource.DiscoveredResource{{FlatName: "active.md", AbsPath: srcFile}, {FlatName: "orphan.md", AbsPath: orphanSrc}}, sourceDir, targetDir, "merge", false, false); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create non-symlink file (should not be removed)
 	os.WriteFile(filepath.Join(targetDir, "local.md"), []byte("# Local"), 0644)
@@ -456,18 +459,28 @@ func TestSyncAgents_CopyMode_DifferentContent(t *testing.T) {
 		t.Fatalf("SyncAgents copy: %v", err)
 	}
 
-	if len(result.Updated) != 1 {
-		t.Errorf("expected 1 updated, got %d", len(result.Updated))
+	if len(result.Skipped) != 1 {
+		t.Errorf("expected 1 skipped, got %d", len(result.Skipped))
 	}
 
 	data, _ := os.ReadFile(filepath.Join(targetDir, "tutor.md"))
-	if string(data) != "# New" {
-		t.Errorf("content = %q, want %q", string(data), "# New")
+	if string(data) != "# Old" {
+		t.Errorf("content = %q, want %q", string(data), "# Old")
 	}
 }
 
 func TestPruneOrphanAgentCopies(t *testing.T) {
 	targetDir := t.TempDir()
+	sourceDir := t.TempDir()
+	for _, name := range []string{"active.md", "orphan.md"} {
+		path := filepath.Join(sourceDir, name)
+		if err := os.WriteFile(path, []byte("# "+map[string]string{"active.md": "Active", "orphan.md": "Orphan"}[name]), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := SyncAgents([]resource.DiscoveredResource{{FlatName: name, AbsPath: path}}, sourceDir, targetDir, "copy", false, false); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	os.WriteFile(filepath.Join(targetDir, "active.md"), []byte("# Active"), 0644)
 	os.WriteFile(filepath.Join(targetDir, "orphan.md"), []byte("# Orphan"), 0644)

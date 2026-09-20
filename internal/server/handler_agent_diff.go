@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"skillshare/internal/resource"
+	ssync "skillshare/internal/sync"
 	"skillshare/internal/utils"
 )
 
@@ -49,6 +50,13 @@ func computeAgentTargetDiff(targetDir string, agents []resource.DiscoveredResour
 
 		// Exists — check if symlink points to correct source
 		targetPath := filepath.Join(targetDir, flatName)
+		switch ssync.AgentFileState(targetPath, agent.AbsPath) {
+		case "synced":
+			continue
+		case "update":
+			items = append(items, diffItem{Skill: flatName, Action: "update", Reason: "source content changed", Kind: kindAgent})
+			continue
+		}
 		if fileType&os.ModeSymlink != 0 || utils.IsSymlinkOrJunction(targetPath) {
 			absLink, err := utils.ResolveLinkTarget(targetPath)
 			if err != nil {
@@ -82,16 +90,16 @@ func computeAgentTargetDiff(targetDir string, agents []resource.DiscoveredResour
 	}
 
 	// Orphan/local detection
-	for name, fileType := range existing {
+	for name := range existing {
 		if _, ok := expected[name]; ok {
 			continue
 		}
 		targetPath := filepath.Join(targetDir, name)
-		if fileType&os.ModeSymlink != 0 || utils.IsSymlinkOrJunction(targetPath) {
+		if state := ssync.AgentFileState(targetPath, ""); state == "synced" || state == "update" || state == "orphan" {
 			items = append(items, diffItem{
 				Skill:  name,
 				Action: "prune",
-				Reason: "orphan symlink",
+				Reason: "orphan managed file",
 				Kind:   kindAgent,
 			})
 		} else {

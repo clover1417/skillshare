@@ -368,7 +368,6 @@ extras:
 		t.Fatal("coding.md should be a regular file after copy sync")
 	}
 
-	// Step 2: Change mode to merge and sync WITHOUT --force (should skip)
 	sb.WriteConfig(`source: ` + sb.SourcePath + `
 targets:
   claude:
@@ -382,9 +381,8 @@ extras:
 	result = sb.RunCLI("sync", "extras")
 	result.AssertSuccess(t)
 
-	// File should still be a regular file (skipped because no --force)
-	if sb.IsSymlink(codingFile) {
-		t.Error("coding.md should still be a regular file without --force")
+	if !sb.IsSymlink(codingFile) {
+		t.Error("unchanged managed copy should switch to merge mode")
 	}
 
 	// Step 3: Sync WITH --force (should replace with symlink)
@@ -424,9 +422,8 @@ extras:
 
 	result := sb.RunCLI("sync", "extras")
 
-	result.AssertSuccess(t)
-	// Sync auto-creates missing extras source directories (same as target dirs)
-	result.AssertAnyOutputContains(t, "Created source directory")
+	result.AssertFailure(t)
+	result.AssertAnyOutputContains(t, "source directory does not exist")
 }
 
 func TestSyncExtras_FlattenMerge(t *testing.T) {

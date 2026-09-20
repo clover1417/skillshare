@@ -51,6 +51,12 @@ func createLink(linkPath, sourcePath string, relative bool) error {
 		}
 	}
 
+	if info, err := os.Stat(absSource); err != nil {
+		return err
+	} else if !info.IsDir() {
+		return os.Symlink(absSource, absTarget)
+	}
+
 	// Try junction (no admin required, but requires absolute paths)
 	var stderr bytes.Buffer
 	cmd := exec.Command("cmd", "/c", "mklink", "/J", absTarget, absSource)

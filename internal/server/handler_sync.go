@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -93,8 +94,7 @@ type syncOutcome struct {
 }
 
 // syncResources links skills and agents (kind "" means both) into every target
-// and logs the sync. On failure it returns the HTTP status to report; agent
-// failures only add warnings. Callers must hold s.mu.
+// and logs the sync. On failure it returns the HTTP status to report.
 func (s *Server) syncResources(start time.Time, dryRun, force bool, kind string) (*syncOutcome, int, error) {
 	globalMode := s.cfg.Mode
 	if globalMode == "" {
@@ -211,6 +211,7 @@ func (s *Server) syncResources(start time.Time, dryRun, force bool, kind string)
 		}
 	}
 
+	var agentErrors []error
 	// Agent sync (skip when kind == "skill")
 	if kind != kindSkill {
 		agentsSource := s.agentsSource()
@@ -232,24 +233,29 @@ func (s *Server) syncResources(start time.Time, dryRun, force bool, kind string)
 				ac := target.AgentsConfig()
 				filteredAgents, filterErr := ssync.FilterAgents(agents, ac.Include, ac.Exclude)
 				if filterErr != nil {
-					warnings = append(warnings, "agent sync failed for "+name+": invalid agent filter: "+filterErr.Error())
+					agentErrors = append(agentErrors, fmt.Errorf("agent sync failed for %s: invalid agent filter: %w", name, filterErr))
 					continue
 				}
 				filteredAgents = ssync.FilterAgentsByTarget(filteredAgents, name)
 
 				agentResult, err := ssync.SyncAgents(filteredAgents, agentsSource, agentPath, agentMode, dryRun, force, s.projectRoot)
 				if err != nil {
-					warnings = append(warnings, "agent sync failed for "+name+": "+err.Error())
+					agentErrors = append(agentErrors, fmt.Errorf("agent sync failed for %s: %w", name, err))
 					continue
 				}
 
 				// Prune orphan agents even when the source is empty so uninstall-all
 				// matches skills and clears previously synced target entries.
 				var pruned []string
+				var pruneErr error
 				if agentMode == "merge" {
-					pruned, _ = ssync.PruneOrphanAgentLinks(agentPath, filteredAgents, dryRun)
+					pruned, pruneErr = ssync.PruneOrphanAgentLinks(agentPath, filteredAgents, dryRun)
 				} else if agentMode == "copy" {
-					pruned, _ = ssync.PruneOrphanAgentCopies(agentPath, filteredAgents, dryRun)
+					pruned, pruneErr = ssync.PruneOrphanAgentCopies(agentPath, filteredAgents, dryRun)
+				}
+
+				if pruneErr != nil {
+					agentErrors = append(agentErrors, fmt.Errorf("prune agents for %s: %w", name, pruneErr))
 				}
 
 				// Find or create result entry for this target
@@ -279,6 +285,11 @@ func (s *Server) syncResources(start time.Time, dryRun, force bool, kind string)
 				}
 			}
 		}
+	}
+
+	if err := errors.Join(agentErrors...); err != nil {
+		s.writeOpsLog("sync", "error", start, map[string]any{"scope": "ui"}, err.Error())
+		return nil, http.StatusInternalServerError, err
 	}
 
 	// Log the sync operation

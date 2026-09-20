@@ -89,7 +89,7 @@ func pullFromRemote(cfg *config.Config, dryRun, force bool) error {
 		ui.Warning("[dry-run] No changes will be made")
 		fmt.Println()
 		ui.Info("Would run: git pull")
-		ui.Info("Would run: skillshare sync")
+		ui.Info("Would run: skillshare sync %s", strings.Join(pullSyncArgs(cfg.GitRoot), " "))
 		return nil
 	}
 
@@ -135,19 +135,18 @@ func pullFromRemote(cfg *config.Config, dryRun, force bool) error {
 	// Sync what the pulled scope holds (always global — pull operates on the
 	// global source).
 	fmt.Println()
-	switch cfg.GitRoot {
-	case "agents":
-		return cmdSync([]string{"agents", "--global"})
-	case "extras":
-		return cmdSync([]string{"extras", "--global"})
+	return cmdSync(pullSyncArgs(cfg.GitRoot))
+}
+
+func pullSyncArgs(scope string) []string {
+	switch scope {
+	case "agents", "extras":
+		return []string{scope, "--global"}
 	case "root":
-		if err := cmdSync([]string{"--global"}); err != nil {
-			return err
-		}
-		fmt.Println()
-		return cmdSync([]string{"agents", "--global"})
+		return []string{"--all", "--global"}
+	default:
+		return []string{"--global"}
 	}
-	return cmdSync([]string{"--global"})
 }
 
 func printPullHelp() {
