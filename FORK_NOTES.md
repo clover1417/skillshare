@@ -24,7 +24,7 @@ Base: upstream `4415c7a75a308c733d02b53f45d135e5f24776bf`, checked on 2026-09-20
 
 ## Verification
 
-[Passing Linux and Windows CI](https://github.com/clover1417/skillshare/actions/runs/35489284194), code commit `b7e81872`:
+[Linux and Windows validation](https://github.com/clover1417/skillshare/actions/runs/35489588110), code commit `a8c9b322`:
 
 - Linux: formatting, `go vet ./...`, `go test -race ./internal/... ./cmd/skillshare`, binary build, and the complete integration suite with the race detector.
 - Windows runner: vet, targeted regression tests, binary build and `scripts/test_windows_sync.ps1`.
@@ -46,7 +46,7 @@ go build -o bin/skillshare.exe ./cmd/skillshare
 ./scripts/test_windows_sync.ps1 -Binary ./bin/skillshare.exe
 ```
 
-The working checkout on this machine contains `bin/skillshare.exe`, version `0.21.1-fork.b7e81872`. Its matching web assets were built from the same checkout and cached locally. A normal source build uses version `dev`; follow the upstream UI development/build workflow when rebuilding the frontend on another machine.
+The working checkout on this machine contains `bin/skillshare.exe`, version `0.21.1-fork.2`. Its matching web assets were built from the same checkout and cached locally. A normal source build uses version `dev`; follow the upstream UI development/build workflow when rebuilding the frontend on another machine.
 
 ## Operational boundaries
 
