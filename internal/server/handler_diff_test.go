@@ -63,9 +63,7 @@ func TestHandleDiff_AgentPruneWhenSourceEmpty(t *testing.T) {
 	if err := os.MkdirAll(agentTarget, 0o755); err != nil {
 		t.Fatalf("mkdir agent target: %v", err)
 	}
-	if err := os.Symlink(filepath.Join(agentSource, "tutor.md"), filepath.Join(agentTarget, "tutor.md")); err != nil {
-		t.Fatalf("seed orphan agent symlink: %v", err)
-	}
+	seedManagedAgent(t, filepath.Join(agentSource, "tutor.md"), filepath.Join(agentTarget, "tutor.md"))
 
 	s.cfg.AgentsSource = agentSource
 	s.cfg.Targets["claude"] = config.TargetConfig{

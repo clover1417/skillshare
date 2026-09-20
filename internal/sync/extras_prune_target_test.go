@@ -18,8 +18,8 @@ func TestPruneExtraTarget_MergeRemovesSymlinksOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(tgt, "a.md")
-	if err := os.Symlink(srcFile, link); err != nil {
-		t.Fatal(err)
+	if result, err := SyncExtra(src, tgt, "merge", false, false, false, "", nil); err != nil || len(result.Errors) > 0 {
+		t.Fatalf("sync: %+v %v", result, err)
 	}
 	local := filepath.Join(tgt, "local.md")
 	if err := os.WriteFile(local, []byte("keep"), 0644); err != nil {
@@ -42,7 +42,10 @@ func TestPruneExtraTarget_MergeRemovesSymlinksOnly(t *testing.T) {
 }
 
 func TestPruneExtraTargetFiles_CopyRemovesManagedOnly(t *testing.T) {
-	tgt := t.TempDir()
+	src, tgt := setupExtrasTest(t, map[string]string{"managed.md": "managed"})
+	if result, err := SyncExtra(src, tgt, "copy", false, false, false, "", nil); err != nil || len(result.Errors) > 0 {
+		t.Fatalf("sync: %+v %v", result, err)
+	}
 
 	managed := filepath.Join(tgt, "managed.md")
 	if err := os.WriteFile(managed, []byte("managed"), 0644); err != nil {

@@ -142,7 +142,7 @@ func cmdExtrasRemoveTarget(args []string) error {
 	var pruned int
 	if prune {
 		var managedFiles map[string]bool
-		if targetMode == "copy" {
+		if targetMode != "symlink" {
 			var managedErr error
 			managedFiles, managedErr = managedExtraTargetFiles(target, sourceDirForExtra(extras[idx]), extensionsDir)
 			if managedErr != nil {

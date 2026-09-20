@@ -238,3 +238,48 @@ func TestFileSyncMissingSourcePreservesManagedTarget(t *testing.T) {
 		t.Fatalf("missing source pruned target: %q %v", data, err)
 	}
 }
+
+func TestFileSyncTargetRemovalPreservesLocalChanges(t *testing.T) {
+	src, dst := setupExtrasTest(t, map[string]string{"changed.md": "initial", "remove.md": "managed"})
+	if result, err := SyncExtra(src, dst, "copy", false, false, false, "", nil); err != nil || len(result.Errors) != 0 {
+		t.Fatalf("sync: %+v %v", result, err)
+	}
+	for _, name := range []string{"changed.md", "private.md"} {
+		if err := os.WriteFile(filepath.Join(dst, name), []byte("local"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, failures := PruneExtraTargetFiles(dst, "copy", map[string]bool{"changed.md": true, "remove.md": true, "private.md": true})
+	if removed != 1 || len(failures) != 0 {
+		t.Fatalf("remove target: %d %v", removed, failures)
+	}
+	for _, name := range []string{"changed.md", "private.md"} {
+		if data, err := os.ReadFile(filepath.Join(dst, name)); err != nil || string(data) != "local" {
+			t.Fatalf("local file removed: %s %q %v", name, data, err)
+		}
+	}
+}
+
+func TestFileSyncDirectoryOverlapAndMissingSource(t *testing.T) {
+	src, dst := setupExtrasTest(t, map[string]string{"AGENTS.md": "keep"})
+	for _, target := range []string{src, filepath.Dir(src), filepath.Join(src, "nested")} {
+		if _, err := SyncExtra(src, target, "symlink", false, true, false, "", nil); err == nil {
+			t.Fatalf("overlap accepted: %s", target)
+		}
+		if _, err := SyncAgents(nil, src, target, "symlink", false, true); err == nil {
+			t.Fatalf("agent overlap accepted: %s", target)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(src, "AGENTS.md")); err != nil || string(data) != "keep" {
+		t.Fatalf("source overwritten: %q %v", data, err)
+	}
+	if _, err := SyncExtra(src+"-missing", dst, "symlink", false, true, false, "", nil); err == nil {
+		t.Fatal("missing directory link source accepted")
+	}
+	if result, err := SyncExtra(src, dst, "symlink", false, true, false, "", nil); err != nil || len(result.Errors) != 0 {
+		t.Fatalf("directory link sync: %+v %v", result, err)
+	}
+	if status := CheckSyncStatus([]string{"AGENTS.md"}, src, dst, "symlink", false, ""); status != "synced" {
+		t.Fatalf("directory link status: %s", status)
+	}
+}

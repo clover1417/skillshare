@@ -28,7 +28,7 @@ func TestComputeAgentTargetDiff_MissingInTarget(t *testing.T) {
 	}
 }
 
-func TestComputeAgentTargetDiff_OrphanSymlink(t *testing.T) {
+func TestComputeAgentTargetDiff_UnmanagedSymlinkPreserved(t *testing.T) {
 	targetDir := t.TempDir()
 	os.Symlink("/nonexistent/old.md", filepath.Join(targetDir, "orphan.md"))
 
@@ -37,8 +37,8 @@ func TestComputeAgentTargetDiff_OrphanSymlink(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
 	}
-	if items[0].Action != "prune" {
-		t.Errorf("expected action 'prune', got %q", items[0].Action)
+	if items[0].Action != "local" {
+		t.Errorf("expected action 'local', got %q", items[0].Action)
 	}
 }
 

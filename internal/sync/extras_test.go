@@ -648,7 +648,9 @@ func TestSyncExtra_FlattenPrune(t *testing.T) {
 	orphanSrc := filepath.Join(src, "old", "removed.md")
 	os.MkdirAll(filepath.Dir(orphanSrc), 0755)
 	os.WriteFile(orphanSrc, []byte("old"), 0644)
-	os.Symlink(orphanSrc, filepath.Join(tgt, "removed.md"))
+	if result, err := SyncExtra(src, tgt, "merge", false, false, true, "", nil); err != nil || len(result.Errors) != 0 {
+		t.Fatalf("seed managed orphan: %+v %v", result, err)
+	}
 	os.RemoveAll(filepath.Join(src, "old"))
 
 	result, err := SyncExtra(src, tgt, "merge", false, false, true, "", nil)

@@ -102,6 +102,13 @@ func syncManagedFile(srcFile, tgtFile, mode string, dryRun, force, relative bool
 	if err != nil {
 		return 0, 0, err
 	}
+	return syncManagedContent(srcFile, tgtFile, data, sourceInfo.Mode().Perm(), mode, dryRun, force, relative, kind)
+}
+
+func syncManagedContent(srcFile, tgtFile string, data []byte, permissions os.FileMode, mode string, dryRun, force, relative bool, kind string) (int, int, error) {
+	if utils.PathsEqual(evalOrClean(srcFile), evalOrClean(tgtFile)) && !utils.IsSymlinkOrJunction(tgtFile) {
+		return 0, 0, fmt.Errorf("source and target are the same file: %s", tgtFile)
+	}
 	mode = effectiveFileMode(mode)
 	dir := filepath.Dir(tgtFile)
 	if !dryRun {
@@ -129,9 +136,10 @@ func syncManagedFile(srcFile, tgtFile, mode string, dryRun, force, relative bool
 	}
 	if statErr == nil {
 		isLink := utils.IsSymlinkOrJunction(tgtFile)
-		if mode == "merge" && isLink && !info.IsDir() {
+		if mode == "merge" && isLink && info.Mode()&os.ModeSymlink != 0 {
 			dest, err := os.Readlink(tgtFile)
-			if err == nil && linkResolvesToSource(resolveReadlink(dest, tgtFile), srcFile) && !linkNeedsReformat(dest, relative) {
+			targetInfo, targetErr := os.Stat(tgtFile)
+			if err == nil && targetErr == nil && targetInfo.Mode().IsRegular() && linkResolvesToSource(resolveReadlink(dest, tgtFile), srcFile) && !linkNeedsReformat(dest, relative) {
 				if !dryRun {
 					entries[name] = record
 					if err := writeFileManifest(dir, entries); err != nil {
@@ -167,7 +175,7 @@ func syncManagedFile(srcFile, tgtFile, mode string, dryRun, force, relative bool
 		return 1, 0, nil
 	}
 	if mode == "copy" {
-		if err := replaceFile(tgtFile, data, sourceInfo.Mode().Perm()); err != nil {
+		if err := replaceFile(tgtFile, data, permissions); err != nil {
 			return 0, 0, err
 		}
 	} else {
@@ -233,6 +241,20 @@ func sourceWithin(path, root string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
+func validateDirectoryLink(source, target string) error {
+	info, err := os.Stat(source)
+	if err != nil {
+		return fmt.Errorf("directory link source: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("directory link source is not a directory: %s", source)
+	}
+	if !utils.IsSymlinkOrJunction(target) && (sourceWithin(source, target) || sourceWithin(target, source)) {
+		return fmt.Errorf("source and target directories overlap: %s, %s", source, target)
+	}
+	return nil
+}
+
 func pruneManagedFiles(dir string, candidate func(string, managedFile) bool, dryRun bool) ([]string, error) {
 	if _, err := os.Stat(filepath.Join(dir, fileManifestName)); os.IsNotExist(err) {
 		return nil, nil
@@ -279,6 +301,12 @@ func pruneManagedFiles(dir string, candidate func(string, managedFile) bool, dry
 }
 
 func pruneOwnedExtras(source, target string, expected map[string]bool) (int, []string) {
+	return pruneExtraManifests(target, func(rel string, entry managedFile) bool {
+		return sourceWithin(entry.Source, source) && !expected[rel]
+	}, expected)
+}
+
+func pruneExtraManifests(target string, candidate func(string, managedFile) bool, protected map[string]bool) (int, []string) {
 	var dirs []string
 	var failures []string
 	err := filepath.Walk(target, func(path string, info os.FileInfo, err error) error {
@@ -290,7 +318,7 @@ func pruneOwnedExtras(source, target string, expected map[string]bool) (int, []s
 		}
 		if info.IsDir() {
 			rel, _ := filepath.Rel(target, path)
-			if info.Name() == ".git" || utils.IsSymlinkOrJunction(path) || expected[rel] {
+			if info.Name() == ".git" || utils.IsSymlinkOrJunction(path) || protected[rel] {
 				return filepath.SkipDir
 			}
 		} else if info.Name() == fileManifestName {
@@ -305,7 +333,7 @@ func pruneOwnedExtras(source, target string, expected map[string]bool) (int, []s
 	for _, dir := range dirs {
 		removed, err := pruneManagedFiles(dir, func(name string, entry managedFile) bool {
 			rel, err := filepath.Rel(target, filepath.Join(dir, name))
-			return err == nil && entry.Kind == "extra" && sourceWithin(entry.Source, source) && !expected[rel]
+			return err == nil && entry.Kind == "extra" && candidate(rel, entry)
 		}, false)
 		pruned += len(removed)
 		if err != nil {

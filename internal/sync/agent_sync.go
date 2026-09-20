@@ -92,6 +92,9 @@ func syncAgentsMerge(agents []resource.DiscoveredResource, sourceDir, targetDir 
 // syncAgentsSymlink creates a single directory symlink from targetDir to sourceDir.
 // If targetDir already exists as a real directory, it's replaced only with force.
 func syncAgentsSymlink(sourceDir, targetDir string, dryRun, force bool, projectRoot string) (*AgentSyncResult, error) {
+	if err := validateDirectoryLink(sourceDir, targetDir); err != nil {
+		return nil, err
+	}
 	result := &AgentSyncResult{}
 	relative := shouldUseRelative(projectRoot, sourceDir, targetDir)
 
